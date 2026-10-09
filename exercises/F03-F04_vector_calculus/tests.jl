@@ -35,5 +35,8 @@ end
 
 @testset "F03-F04 自作テスト" begin
     # TODO(自作): 別の関数、評価点、または入力条件を選び、どの実装ミスを検出するか説明できるテストを一つ書く。F03単独の別テストは作らない。
-    @test false
+    linear(x) = 3x + 2
+    @test forward_difference(linear, 1.0, 0.5) ≈ 3.0
+    @test backward_difference(linear, 1.0, 0.5) ≈ 3.0
+    @test centered_difference(linear, 1.0, 0.5) ≈ 3.0
 end
