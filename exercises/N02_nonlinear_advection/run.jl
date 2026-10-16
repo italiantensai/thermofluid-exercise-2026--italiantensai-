@@ -28,7 +28,7 @@ N02授業の保存形Burgers流束を、配列全体ではなく1点のスカラ
 function burgers_flux(u::Real)
     isfinite(u) || throw(ArgumentError("流束の入力を有限値にしてください"))
     # TODO(N02): 保存形Burgers方程式の流束を返す。
-    error("未実装 N02: burgers_flux")
+    return u^2 / 2
 end
 
 """
@@ -56,7 +56,7 @@ function periodic_left_index(i::Integer, n::Integer)
     (i isa Bool || n isa Bool || n < 1 || !(1 <= i <= n)) &&
         throw(ArgumentError("添字は1 <= i <= n、点数はn >= 1の整数です（Bool不可）"))
     # TODO(N02): 先頭の左隣が末尾になるようにする。
-    error("未実装 N02: periodic_left_index")
+    return i == 1 ? n : i - 1
 end
 
 """
@@ -92,7 +92,8 @@ function nonlinear_upwind_step!(u_new, u_old, dt::Real, dx::Real; boundary = :fi
     for i in indices
         left = boundary == :periodic ? periodic_left_index(i, length(u_old)) : i - 1
         # TODO(N02): 古い値の流束の差で更新する。u_oldは変更しない。
-        error("未実装 N02: nonlinear_upwind_step!")
+        u_new[i] = u_old[i] - (dt / dx) *
+                   (burgers_flux(u_old[i]) - burgers_flux(u_old[left]))
     end
     all(isfinite, u_new) || error("更新後に非有限値があります。更新式を確認してください")
     return u_new
@@ -171,14 +172,22 @@ function simulate(;
     u_old = copy(u0)
     u_new = similar(u_old)
     max_cfl = maximum(abs, u_old) * dt / dx
+    # 公開課題の中間時刻用。既定の160ステップでは0,0.25,0.5,0.75,1。
+    sample_steps = unique(round.(Int, range(0, steps; length = 5)))
+    saved_times = [0.0]
+    saved_states = [copy(u0)]
 
     # 旧場から更新し、診断・境界処理を終えてから次の反復へ進む。
-    for _ in 1:steps
+    for step in 1:steps
         nonlinear_upwind_step!(u_new, u_old, dt, dx; boundary)
         apply_boundary!(u_new; boundary)
         all(isfinite, u_new) || error("更新後に非有限値があります")
         max_cfl = max(max_cfl, maximum(abs, u_new) * dt / dx)
         u_old, u_new = u_new, u_old
+        if step in sample_steps
+            push!(saved_times, step * dt)
+            push!(saved_states, copy(u_old))
+        end
     end
     initial_minimum, initial_maximum = extrema(u0)
     low, high = extrema(u_old)
@@ -193,6 +202,8 @@ function simulate(;
         steps,
         max_cfl,
         t_final,
+        saved_times,
+        saved_states,
         initial_minimum,
         initial_maximum,
         minimum = low,
@@ -203,6 +214,30 @@ function simulate(;
         final_sum = sum(u_old),
         sum_change = sum(u_old) - sum(u0),
     )
+end
+
+"""公開課題の5時刻の表示を、提供の汎用描画より具体的なメソッドで補う。"""
+function solution_plot(r::NamedTuple; periodic = false)
+    x = periodic ? vcat(r.x, 2.0) : r.x
+    colors = palette(:viridis, length(r.saved_times))
+    low = minimum(minimum, r.saved_states)
+    high = maximum(maximum, r.saved_states)
+    padding = 0.05 * (high - low)
+    boundary_label = periodic ? "Periodic boundary" : "Fixed boundary"
+    p = plot(;
+        xlabel = "x", ylabel = "u", size = (800, 500),
+        title = "$boundary_label, t = $(r.t_final)",
+        ylims = (min(0.9, low - padding), max(2.1, high + padding)),
+    )
+    for (index, (time, state)) in enumerate(zip(r.saved_times, r.saved_states))
+        # 周期終点は表示専用で、診断用配列や総和には含めない。
+        y = periodic ? vcat(state, state[1]) : state
+        time_label = "t = $(round(time; digits = 3))"
+        label = index == 1 ? "Initial ($time_label)" :
+                index == length(r.saved_times) ? "Final ($time_label)" : time_label
+        plot!(p, x, y; label, linewidth = 2, color = colors[index])
+    end
+    return p
 end
 
 """

@@ -49,7 +49,31 @@ using .N02NonlinearAdvection
 end
 @testset "N02 自作テスト" begin
     # TODO(自作): 周期の非定数・非負配列を複数ステップ進め、離散総和保存を確認する。入力・許容誤差・期待値を自分で決める。
-    @test false
+    @testset "周期境界で40ステップ後の総和を保存" begin
+        initial = [0.25, 1.75, 0.5, 2.0, 1.25, 0.75]
+        old = copy(initial)
+        new = similar(old)
+        steps = 40
+        # 最大初期CFLは2*0.05/0.25=0.4で、非負の安定な計算。
+        for _ in 1:steps
+            nonlinear_upwind_step!(new, old, 0.05, 0.25; boundary = :periodic)
+            apply_boundary!(new; boundary = :periodic)
+            old, new = new, old
+        end
+        # 加減乗算・総和の丸めを点数とステップ数に比例する幅で許す。
+        tolerance = 10eps(Float64) * length(initial) * steps * maximum(abs, initial)
+        @test isapprox(sum(old), 6.5; atol = tolerance, rtol = 0)
+    end
     # TODO(自作): 周期1ステップSについてS(circshift(u,k)) ≈ circshift(S(u),k)を確認する。非対称な非定数配列、k≠0、同じdtとdxを使う。
-    @test false
+    @testset "非対称な周期配列の循環移動と更新が整合" begin
+        initial = [0.2, 1.1, 0.4, 1.7, 0.8, 1.4, 0.3]
+        k = 2
+        shifted = circshift(initial, k)
+        updated = similar(initial)
+        updated_shifted = similar(initial)
+        nonlinear_upwind_step!(updated, initial, 0.02, 0.1; boundary = :periodic)
+        nonlinear_upwind_step!(updated_shifted, shifted, 0.02, 0.1; boundary = :periodic)
+        tolerance = 20eps(Float64) * maximum(abs, initial)
+        @test isapprox(updated_shifted, circshift(updated, k); atol = tolerance, rtol = 0)
+    end
 end
