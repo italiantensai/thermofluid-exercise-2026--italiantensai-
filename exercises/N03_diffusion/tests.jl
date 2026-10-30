@@ -61,9 +61,38 @@ end
 @testset "N03 自作テスト" begin
     # TODO(自作): 非対称な非定数配列を複数ステップ進め、断熱の台形則熱量保存を確認する。
     # 初期熱量を独立に計算し、点数・ステップ数・値の大きさから許容誤差を決める。
-    @test false
+    @testset "非対称な温度場の断熱熱量を60ステップ保存" begin
+        initial = [0.2, 1.4, 0.6, 2.1, 0.9, 0.3]
+        old = copy(initial)
+        new = similar(old)
+        dx = 0.2
+        steps = 60
+        # 独立した手計算: 0.2*(0.2/2+1.4+0.6+2.1+0.9+0.3/2)=1.05。
+        expected_heat = 1.05
+        for _ in 1:steps
+            N03Diffusion.diffusion_step!(new, old, 0.1, dx, 0.1; boundary=:insulated)
+            old, new = new, old
+        end
+        # 点数・反復数・温度の規模・格子幅に応じた絶対丸め誤差の余裕。
+        tolerance = 10eps(Float64) * length(initial) * steps * maximum(abs, initial) * dx
+        @test isapprox(N03Diffusion.thermal_content(old, dx), expected_heat;
+            atol=tolerance, rtol=0)
+    end
 
     # TODO(自作): 固定温度の正弦解析解と41・81・161点の数値解を同時刻・同じfoで比較する。
     # 誤差の減少と観測次数を確認し、指標・許容範囲・検出限界を説明する。
-    @test false
+    @testset "固定温度の正弦モードが同時刻で約2次収束" begin
+        errors = Float64[]
+        for nx in (41, 81, 161)
+            r = N03Diffusion.simulate(; boundary=:fixed, nx, initial=:mode,
+                diffusivity=0.1, fo=0.4, t_final=1.0)
+            # 提供された解析解関数を呼ばず、テスト側で期待解を明示する。
+            exact = exp(-0.1 * (pi / 2)^2) .* sin.(pi .* r.x ./ 2)
+            push!(errors, maximum(abs.(r.u - exact)))
+        end
+        orders = log2.(errors[1:2] ./ errors[2:3])
+        @test errors[1] > errors[2] > errors[3] > 0
+        @test all(p -> 1.9 < p < 2.1, orders)
+        @test errors[3] < 1e-5
+    end
 end
