@@ -45,8 +45,36 @@ end
 @testset "N04 自作テスト" begin
     # TODO(自作): 非対称な非定数配列を複数ステップ進め、周期積分の保存を確認する。
     # 初期積分を独立に計算し、点数・ステップ数・値の大きさから許容誤差を説明する。
-    @test false # TODO(N04): 複数ステップ保存
+    @testset "非対称周期配列の60ステップ積分保存" begin
+        initial = [1.0, 1.8, 1.1, 2.0, 1.4, 0.7]
+        old = copy(initial)
+        new = similar(old)
+        dx = 0.25
+        steps = 60
+        # 独立した手計算: 0.25*(1+1.8+1.1+2+1.4+0.7)=2.0。
+        expected_integral = 2.0
+        # C=0.16、Fo=0.032、C+2Fo=0.224で合成条件を満たす。
+        for _ in 1:steps
+            N04.advection_diffusion_step!(new, old, 0.04, dx, 0.05)
+            old, new = new, old
+        end
+        tolerance = 10eps(Float64) * length(initial) * steps * maximum(abs, initial) * dx
+        @test isapprox(N04.conserved_integral(old, dx), expected_integral;
+            atol=tolerance, rtol=0)
+    end
     # TODO(自作): 選択モデルの解析解と40・80・160点の誤差・観測次数を確認する。
     # 誤差の指標、同じ最終時刻、0.8〜1.2の次数範囲、検出できない誤りも説明する。
-    @test false # TODO(N04): 格子収束
+    @testset "線形周期解析モードの約1次の格子収束" begin
+        errors = Float64[]
+        for nx in (40, 80, 160)
+            r = N04.simulate(; nx, initial=:mode, diffusivity=0.1,
+                speed=1.0, safety=0.8, t_final=1.0)
+            # 提供解析解を呼ばず、線形モデルの期待解をテスト側に明示。
+            exact = 1 .+ 0.5 * exp(-0.1 * pi^2) .* sin.(pi .* (r.x .- 1))
+            push!(errors, maximum(abs.(r.u - exact)))
+        end
+        orders = log2.(errors[1:2] ./ errors[2:3])
+        @test errors[1] > errors[2] > errors[3] > 0
+        @test all(p -> 0.8 < p < 1.2, orders)
+    end
 end
