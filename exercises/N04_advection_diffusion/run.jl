@@ -2,6 +2,7 @@
 # 読む順: 流束 → 刻み → 1ステップ → simulate → main。入力検証・解析解・描画は提供済み。
 module N04AdvectionDiffusion
 const SELECTED_MODEL = :linear
+import ThermofluidExercise
 include("provided_support.jl")
 export SELECTED_MODEL,
     advective_flux,
@@ -28,26 +29,12 @@ export SELECTED_MODEL,
 
 # 返り値
 
-実装後はスカラーの流束。
+スカラーの流束。
 
-# 受講生のToDo
-
-SELECTED_MODELで選んだ枝だけに、N01の線形流束またはN02のBurgers流束を移す。スカラー1点の入力を扱う。
-モデル・有限性・速度の検証は提供済み。配布状態の `:unselected` はモデル検証で拒否され、選択済みの枝も未完成なら既存の未実装エラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function advective_flux(u; model = SELECTED_MODEL, speed = 1.0)
-    # 計算や書込みの前に、入力条件をまとめて確認する。
-    validate_model(model)
-    finite_real(u, "u")
-    validate_speed(model, speed)
-    if model == :linear
-        # TODO(N04): 線形を選んだ場合だけ実装する。
-        return speed * u
-    else
-        nonnegative_finite(u, "非線形移流のu")
-        # TODO(N04): 非線形を選んだ場合だけ実装する。
-        error("未実装 N04: advective_flux (nonlinear)")
-    end
+    return ThermofluidExercise.N04.advective_flux(u; model, speed)
 end
 
 """
@@ -66,18 +53,12 @@ end
 
 # 返り値
 
-実装後は有限な正の時間刻み。
+有限な正の時間刻み。
 
-# 受講生のToDo
-
-移流と拡散を別々に制限するのでなく、両者の寄与を足した安定上限にsafetyを適用して刻みを返す。
-入力検証は提供済み。[N04課題「離散化と時間刻み」](https://t2lab-it.github.io/thermofluid-exercise-2026/assignments/N04.html#discretization)を参照する。配布状態では検証後に未実装エラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function stable_timestep(max_speed, dx, diffusivity; safety = 0.8)
-    validate_timestep_inputs(max_speed, dx, diffusivity, safety)
-    # TODO(N04): 合成条件から刻みを返す。
-    rate = max_speed / dx + 2 * (diffusivity / dx) / dx
-    return checked_timestep(safety / rate)
+    return ThermofluidExercise.N04.stable_timestep(max_speed, dx, diffusivity; safety)
 end
 
 """
@@ -109,13 +90,9 @@ end
 
 # 返り値
 
-実装後は全点を書き換えた `u_new`。旧配列を保持する。
+全点を書き換えた `u_new`。旧配列を保持する。
 
-# 受講生のToDo
-
-提供ループの全点で、周期の左右隣接を使い、移流と拡散を同じ旧ベクトルから評価して新ベクトルへ書く。
-新旧は同じ記憶領域を共有せず、更新中の新値を旧値の代わりに読まない。入力・合成安定条件の検証は提供済み。
-移流を含める場合は選択モデルのadvective_fluxも必要。advection=falseでは拡散だけを扱う。[N04課題「離散化と時間刻み」](https://t2lab-it.github.io/thermofluid-exercise-2026/assignments/N04.html#discretization)を参照する。配布状態では検証後に未実装エラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function advection_diffusion_step!(
     u_new,
@@ -127,21 +104,9 @@ function advection_diffusion_step!(
     advection = true,
     speed = 1.0,
 )
-    # 計算や書込みの前に、入力条件をまとめて確認する。
-    validate_step(u_new, u_old, dt, dx, diffusivity, model, advection, speed)
-    n = length(u_old)
-    r = diffusivity * (dt / dx) / dx
-    for i in eachindex(u_old)
-        # TODO(N04): 周期の左右隣接を使い、移流と拡散を同じ旧配列から足す。
-        left = i == 1 ? n : i - 1
-        right = i == n ? 1 : i + 1
-        advective_change = advection ? (dt / dx) *
-            (advective_flux(u_old[i]; model, speed) -
-             advective_flux(u_old[left]; model, speed)) : 0.0
-        u_new[i] = u_old[i] - advective_change +
-                   r * (u_old[right] - 2 * u_old[i] + u_old[left])
-    end
-    return u_new
+    return ThermofluidExercise.N04.advection_diffusion_step!(
+        u_new, u_old, dt, dx, diffusivity; model, advection, speed,
+    )
 end
 
 """
