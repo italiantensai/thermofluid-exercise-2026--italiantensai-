@@ -394,8 +394,9 @@ function thermal_stable_timestep(cx, cy, kappa, dx, dy, bc; safety = 0.8)
     # 計算や書込みの前に、入力条件をまとめて確認する。
     thermal_parameters(cx, cy, kappa, dx, dy, bc; safety)
     require(thermal_rate(cx, cy, kappa, dx, dy, bc) > 0, "全係数0では刻みを決められません")
-    # TODO(N07): 半セル境界を含む合成上限から時間刻みを求める。
-    dt = error("未実装 N07: thermal_stable_timestep")
+    ax = any(b -> b.kind in (:dirichlet, :inflow), (bc.west, bc.east)) ? 3 : 2
+    ay = any(b -> b.kind in (:dirichlet, :inflow), (bc.south, bc.north)) ? 3 : 2
+    dt = safety / (abs(cx) / dx + abs(cy) / dy + kappa * (ax / dx^2 + ay / dy^2))
     checked_timestep(dt)
 end
 
@@ -433,8 +434,44 @@ function thermal_fluxes!(fluxes, T, dx, dy; cx, cy, kappa, bc)
     # 計算や書込みの前に、入力条件をまとめて確認する。
     thermal_parameters(cx, cy, kappa, dx, dy, bc)
     validate_fluxes(fluxes, T)
-    # TODO(N07): 正x・正y方向、移流と拡散を分けて全ての面へ書く。
-    error("未実装 N07: thermal_fluxes!")
+    nx, ny = size(T)
+    for j in 1:ny, i in 1:(nx - 1)
+        fluxes.adv_x[i + 1, j] = cx * (cx >= 0 ? T[i, j] : T[i + 1, j])
+        fluxes.diff_x[i + 1, j] = -kappa * (T[i + 1, j] - T[i, j]) / dx
+    end
+    for j in 1:(ny - 1), i in 1:nx
+        fluxes.adv_y[i, j + 1] = cy * (cy >= 0 ? T[i, j] : T[i, j + 1])
+        fluxes.diff_y[i, j + 1] = -kappa * (T[i, j + 1] - T[i, j]) / dy
+    end
+    for j in 1:ny
+        if bc.west.kind == :periodic
+            a = cx * (cx >= 0 ? T[nx, j] : T[1, j])
+            d = -kappa * (T[1, j] - T[nx, j]) / dx
+            fluxes.adv_x[1, j] = fluxes.adv_x[nx + 1, j] = a
+            fluxes.diff_x[1, j] = fluxes.diff_x[nx + 1, j] = d
+        else
+            fluxes.adv_x[1, j] = bc.west.kind == :inflow ? cx * bc.west.value : 0
+            fluxes.diff_x[1, j] = bc.west.kind in (:dirichlet, :inflow) ?
+                2kappa * (bc.west.value - T[1, j]) / dx : 0
+            fluxes.adv_x[nx + 1, j] = bc.east.kind == :outflow ? cx * T[nx, j] : 0
+            fluxes.diff_x[nx + 1, j] = bc.east.kind == :dirichlet ?
+                2kappa * (T[nx, j] - bc.east.value) / dx : 0
+        end
+    end
+    for i in 1:nx
+        if bc.south.kind == :periodic
+            a = cy * (cy >= 0 ? T[i, ny] : T[i, 1])
+            d = -kappa * (T[i, 1] - T[i, ny]) / dy
+            fluxes.adv_y[i, 1] = fluxes.adv_y[i, ny + 1] = a
+            fluxes.diff_y[i, 1] = fluxes.diff_y[i, ny + 1] = d
+        else
+            fluxes.adv_y[i, 1] = fluxes.adv_y[i, ny + 1] = 0
+            fluxes.diff_y[i, 1] = bc.south.kind == :dirichlet ?
+                2kappa * (bc.south.value - T[i, 1]) / dy : 0
+            fluxes.diff_y[i, ny + 1] = bc.north.kind == :dirichlet ?
+                2kappa * (T[i, ny] - bc.north.value) / dy : 0
+        end
+    end
     fluxes
 end
 
@@ -473,8 +510,25 @@ function thermal_step!(Tnew, Told, dt, dx, dy; cx, cy, kappa, bc)
     positive(dt, "dt")
     rate = thermal_rate(cx, cy, kappa, dx, dy, bc)
     require(dt * rate <= 1 + 32eps(Float64), "温度の安定上限を超えています")
-    # TODO(N07): Common.validate_buffersも再利用し、同じ旧場の面流束を一度構築して更新と辺別レートに使う。
-    error("未実装 N07: thermal_step!")
+    Common.validate_buffers(Tnew, Told)
+    f = flux_buffers(Told)
+    thermal_fluxes!(f, Told, dx, dy; cx, cy, kappa, bc)
+    nx, ny = size(Told)
+    for j in 1:ny, i in 1:nx
+        Tnew[i, j] = Told[i, j] - dt / dx *
+            (f.adv_x[i + 1, j] + f.diff_x[i + 1, j] - f.adv_x[i, j] - f.diff_x[i, j]) -
+            dt / dy *
+            (f.adv_y[i, j + 1] + f.diff_y[i, j + 1] - f.adv_y[i, j] - f.diff_y[i, j])
+    end
+    inward_rates(fx, fy) = (;
+        west = dy * sum(@view fx[1, :]),
+        east = -dy * sum(@view fx[end, :]),
+        south = dx * sum(@view fy[:, 1]),
+        north = -dx * sum(@view fy[:, end]),
+    )
+    advective = inward_rates(f.adv_x, f.adv_y)
+    diffusive = inward_rates(f.diff_x, f.diff_y)
+    (; temperature = Tnew, boundary_rates = (; advective, diffusive))
 end
 
 """
@@ -565,8 +619,8 @@ function burgers_stable_timestep(u, v, nu, dx, dy; safety = 0.8)
     # 計算や書込みの前に、入力条件をまとめて確認する。
     burgers_parameters(u, v, nu, dx, dy; safety)
     require(burgers_rate(u, v, nu, dx, dy) > 0, "全速度・粘性0では刻みを決められません")
-    # TODO(N07): このステップの旧場の局所速度から合成刻みを決める。
-    dt = error("未実装 N07: burgers_stable_timestep")
+    advection = maximum(abs(u[k]) / dx + abs(v[k]) / dy for k in eachindex(u, v))
+    dt = safety / (advection + 2nu * (1 / dx^2 + 1 / dy^2))
     checked_timestep(dt)
 end
 
@@ -609,8 +663,23 @@ function burgers_step!(unew, vnew, uold, vold, dt, dx, dy; nu)
         dt * burgers_rate(uold, vold, nu, dx, dy) <= 1 + 32eps(Float64),
         "Burgersの安定上限を超えています",
     )
-    # TODO(N07): Common.validate_buffersと周期添字を再利用し、正負風上と拡散で二成分を同じ旧場から更新する。
-    error("未実装 N07: burgers_step!")
+    Common.validate_buffers(unew, uold)
+    Common.validate_buffers(vnew, vold)
+    nx, ny = size(uold)
+    for j in 1:ny, i in 1:nx
+        left, right = Common.periodic_left_index(i, nx), Common.periodic_right_index(i, nx)
+        down, up = Common.periodic_left_index(j, ny), Common.periodic_right_index(j, ny)
+        for (new, old) in ((unew, uold), (vnew, vold))
+            derivative_x = uold[i, j] >= 0 ? (old[i, j] - old[left, j]) / dx :
+                (old[right, j] - old[i, j]) / dx
+            derivative_y = vold[i, j] >= 0 ? (old[i, j] - old[i, down]) / dy :
+                (old[i, up] - old[i, j]) / dy
+            laplacian = (old[right, j] - 2old[i, j] + old[left, j]) / dx^2 +
+                (old[i, up] - 2old[i, j] + old[i, down]) / dy^2
+            new[i, j] = old[i, j] - dt *
+                (uold[i, j] * derivative_x + vold[i, j] * derivative_y) + dt * nu * laplacian
+        end
+    end
     (; u = unew, v = vnew)
 end
 end

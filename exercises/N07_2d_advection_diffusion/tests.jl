@@ -164,13 +164,73 @@ end
     )
 end
 @testset "N07 自作: 開境界2条件の辺別熱収支" begin
-    # TODO(自作): 複数ステップで辺別・移流/拡散別の積算、熱量変化、断熱壁を検証する。
-    # 入力と独立期待値、許容値の根拠を記す。公式出力は上書きしない。
-    @test false
+    # 独立なセル中心・ゴーストセルのPython計算による12ステップの期待値。
+    # dt=0.01, dx=0.5, dy=0.25, cx=1, kappa=0.05。積算の丸めにatol=1e-12。
+    initial = [1. 2. 4. 3.; 5. 7. 6. 8.; 9. 10. 12. 11.]
+    expected_fields = (
+        [0.982122928441346 1.89090881935051 3.080158083317713 2.2218034806589215;
+         3.5857740247008665 5.673091659789037 5.646319513321143 5.575266088505036;
+         6.70818018903313 9.120544856576116 10.310208813547609 8.465654319580253],
+        [1.1491451843519758 1.898387614537551 3.0990128613600296 2.64896052398954;
+         4.307781470911163 5.706392527351002 5.6987482749629335 6.73257336953615;
+         8.073554840951438 9.182956536790478 10.388171534040008 10.194739971491044],
+    )
+    expected_adv = ([0.12, -1.1547597927181195, 0., 0.],
+                    [0.12, -1.2024049214166939, 0., 0.])
+    expected_diff = ([-0.03068476985742098, 0., -0.3162130967994221, -0.46083824352232744],
+                     [-0.032541989799143044, 0., 0., 0.])
+    for (case, wall) in enumerate((:dirichlet, :insulated))
+        bc = N.channel_boundaries(wall)
+        old, new = copy(initial), similar(initial)
+        adv, diff = zeros(4), zeros(4)
+        for step in 1:12
+            snapshot = copy(old)
+            r = N.thermal_step!(new, old, 0.01, 0.5, 0.25; cx = 1., cy = 0., kappa = 0.05, bc)
+            @test old == snapshot
+            adv .+= 0.01 .* collect(values(r.boundary_rates.advective))
+            diff .+= 0.01 .* collect(values(r.boundary_rates.diffusive))
+            @test 0.125 * (sum(new) - sum(initial)) ≈ sum(adv) + sum(diff) atol = 1e-12 rtol = 0
+            if wall == :insulated
+                @test r.boundary_rates.diffusive.south == r.boundary_rates.diffusive.north == 0
+            end
+            old, new = new, old
+        end
+        @test old ≈ expected_fields[case] atol = 1e-12 rtol = 0
+        @test adv ≈ expected_adv[case] atol = 1e-12 rtol = 0
+        @test diff ≈ expected_diff[case] atol = 1e-12 rtol = 0
+    end
 end
+include("simulate.jl")
 @testset "N07 自作: 温度とBurgersの解析解収束" begin
-    # TODO(自作): 周期温度の拡散・合成と二成分Burgersを3格子で計算し、誤差と両区間の次数を検証する。
-    @test false
+    # 公式3格子をメモリ内で再計算し，保存結果に依存せず解析解と比較する。
+    for id in ("periodic_diffusion", "periodic_combined", "periodic_burgers")
+        errors = Float64[]
+        component_errors = (Float64[], Float64[])
+        for (nx, ny) in OFFICIAL_GRIDS
+            c = N07Simulation.simulate_case(id, nx, ny)
+            if id == "periodic_burgers"
+                ue, ve = exact_burgers(c["x"], c["y"], 1.)
+                eu = sqrt(sum(abs2, c["u"][:, :, end] - ue) / (nx * ny))
+                ev = sqrt(sum(abs2, c["v"][:, :, end] - ve) / (nx * ny))
+                push!(component_errors[1], eu)
+                push!(component_errors[2], ev)
+                push!(errors, hypot(eu, ev))
+            else
+                exact = exact_temperature(c["x"], c["y"], 1., id)
+                push!(errors, sqrt(sum(abs2, c["temperature"][:, :, end] - exact) / (nx * ny)))
+            end
+        end
+        lo, hi = id == "periodic_diffusion" ? (1.8, 2.2) : (0.8, 1.2)
+        @test all(isfinite, errors) && all(errors .> 0)
+        @test all(diff(errors) .< 0)
+        @test all(lo .<= log2.(errors[1:2] ./ errors[2:3]) .<= hi)
+        if id == "periodic_burgers"
+            for e in component_errors
+                @test all(diff(e) .< 0)
+                @test all(0.8 .<= log2.(e[1:2] ./ e[2:3]) .<= 1.2)
+            end
+        end
+    end
 end
 @testset "N07 保存結果と来歴" begin
     @test check_complete()
