@@ -4,6 +4,7 @@
 # 入力検証・収束診断・描画・保存は provided_support.jl に配布済み。
 module N03Diffusion
 
+import ThermofluidExercise
 include("provided_support.jl")
 
 export initial_condition, analytic_solution, apply_boundary!, diffusion_step!, thermal_content,
@@ -88,28 +89,10 @@ end
 
 境界を更新した `u_new` そのもの。新しい配列は作らない。
 
-# 受講生のToDo
-
-断熱端を、旧温度と鏡映ゴースト点を用いて更新する処理を実装する。
-固定温度の処理は提供済み。
-配布時は、断熱条件を選ぶと `未実装 N03: apply_boundary!` のエラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function apply_boundary!(u_new, u_old, r::Real; boundary = :fixed)
-    # 境界を書き込む前に、新旧配列と実効Fourier数を確認する。
-    validate_buffers(u_new, u_old, boundary)
-    positive_finite(r, "r")
-
-    # 境界条件に応じて両端だけを更新する。
-    if boundary == :fixed
-        u_new[1] = 0.0
-        u_new[end] = 0.0
-    else
-        # TODO(N03): 旧配列を用い、半セルに対応する係数で両端を更新する。
-        u_new[1] = u_old[1] + 2 * r * (u_old[2] - u_old[1])
-        u_new[end] = u_old[end] + 2 * r * (u_old[end - 1] - u_old[end])
-    end
-
-    return u_new
+    return ThermofluidExercise.N03.apply_boundary!(u_new, u_old, r; boundary)
 end
 
 """
@@ -132,36 +115,14 @@ end
 
 # 返り値
 
-実装後は、内部点と境界を更新した `u_new` そのものを返す。新しい配列は作らない。
+、内部点と境界を更新した `u_new` そのものを返す。新しい配列は作らない。
 
-# 受講生のToDo
-
-旧温度だけを参照して、各内部点の次時刻の温度を求める処理を実装する。
-境界処理は、末尾の `apply_boundary!` の呼出しから行う。
-配布時は、内部点の更新で `未実装 N03: diffusion_step!` のエラーにより停止する。
+共通パッケージに処理を委譲する。
 """
 function diffusion_step!(
     u_new, u_old, dt::Real, dx::Real, diffusivity::Real; boundary = :fixed,
 )
-    # 配列の独立性と、刻み・格子幅・拡散係数を確認する。
-    validate_buffers(u_new, u_old, boundary)
-    for (value, name) in ((dt, "dt"), (dx, "dx"), (diffusivity, "diffusivity"))
-        positive_finite(value, name)
-    end
-
-    # 更新に使う実効Fourier数を求め、表現可能な正値か確認する。
-    r = diffusivity * dt / dx^2
-    positive_finite(r, "実効Fourier数")
-
-    # 内部点はすべて同じ旧配列から更新する。
-    for i in 2:length(u_old)-1
-        # TODO(N03): 旧配列だけから内部点の次時刻値を計算する。
-        u_new[i] = u_old[i] + r * (u_old[i + 1] - 2 * u_old[i] + u_old[i - 1])
-    end
-
-    # 内部点の後で両端を更新し、次時刻の温度配列を完成させる。
-    apply_boundary!(u_new, u_old, r; boundary)
-    return u_new
+    return ThermofluidExercise.N03.diffusion_step!(u_new, u_old, dt, dx, diffusivity; boundary)
 end
 
 """

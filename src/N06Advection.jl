@@ -79,8 +79,7 @@ function stable_timestep(cx, cy, dx, dy; safety = 0.8)
     positive(safety, "safety")
     safety <= 1 && (cx > 0 || cy > 0) ||
         throw(ArgumentError("safety<=1、少なくとも一方の速度は正です"))
-    # TODO(N06): 方向別寄与を足した安定条件から刻みを求める。
-    dt = error("未実装 N06: stable_timestep")
+    dt = safety / (cx / dx + cy / dy)
 
     # 計算した刻みが元の型でもFloat64でも有限な正値か確認する。
     positive(dt, "合成dt（表現範囲）")
@@ -133,8 +132,16 @@ function advection_step!(u_new, u_old, dt, dx, dy; cx = 1.0, cy = 0.5)
     all(isfinite, (Cx, Cy)) && Cx + Cy <= 1 + 32eps(Float64) ||
         throw(ArgumentError("合成CFL<=1を超えています: Cx=$Cx, Cy=$Cy"))
     nx, ny = size(u_old)
-    # TODO(N06): 両方向の周期隣接と流束を使い、全点を旧配列だけから更新する。
-    error("未実装 N06: advection_step!")
+    center_weight = 1 - (Cx + Cy)
+    for j in 1:ny
+        down = Common.periodic_left_index(j, ny)
+        for i in 1:nx
+            left = Common.periodic_left_index(i, nx)
+            from_x = Common.linear_flux(u_old[left, j], Cx)
+            from_y = Common.linear_flux(u_old[i, down], Cy)
+            u_new[i, j] = center_weight * u_old[i, j] + from_x + from_y
+        end
+    end
     return u_new
 end
 end

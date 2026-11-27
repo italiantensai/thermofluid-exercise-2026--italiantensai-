@@ -5,6 +5,7 @@
 
 module N01LinearAdvection
 
+import ThermofluidExercise
 include("provided_support.jl")
 
 export rectangular_initial_condition, apply_boundary!, upwind_step!, centered_step!
@@ -76,30 +77,12 @@ end
 
 # 返り値
 
-実装後は更新した `u_new`。両端は保持し、境界条件は呼出し側で適用する。
+更新した `u_new`。両端は保持し、境界条件は呼出し側で適用する。
 
-# 受講生のToDo
-
-提供ループの内部点で、同じ旧ベクトルの現在点と左隣から正速度の風上更新を求める。
-入力検証、CFL数courant、旧場のコピーは提供済み。両端は旧値のまま返し、呼出し側が境界を適用する。
-N01授業の風上差分と陽Euler法を参照する。配布状態では内部点の未実装エラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function upwind_step!(u_new, u_old, c::Real, dt::Real, dx::Real)
-    # 計算や書込みの前に、入力条件をまとめて確認する。
-    validate_step_inputs(u_new, u_old, c, dt, dx)
-    # courantは1ステップで進む格子幅の割合を表すCFL数です。
-    courant = c * dt / dx
-    # copyto!で古い値を複製し、内部を更新する間も両端点の値を保ちます。
-    copyto!(u_new, u_old)
-    for i in 2:(length(u_old) - 1)
-        #=
-        TODO(N01):
-        風上差分と陽Euler法による1ステップの更新を実装する。
-        授業ページの式を、iとi - 1の添字を使ってコードへ写す。
-        =#
-        u_new[i] = u_old[i] - courant * (u_old[i] - u_old[i - 1])
-    end
-    return u_new
+    return ThermofluidExercise.N01.upwind_step!(u_new, u_old, c, dt, dx)
 end
 
 """
@@ -119,30 +102,12 @@ end
 
 # 返り値
 
-実装後は `u_new` 自体。両端は旧値を保ち、境界条件は呼出し側で適用する。`u_old` は保持する。
+`u_new` 自体。両端は旧値を保ち、境界条件は呼出し側で適用する。`u_old` は保持する。
 
-# 受講生のToDo
-
-提供ループの内部点で、同じ旧ベクトルの左右隣から中心差分と陽Euler法の更新を求める。
-入力検証、CFL数courant、旧場のコピーは提供済み。両端は旧値のまま返し、呼出し側が境界を適用する。
-N01授業の中心差分と安定性の比較を参照する。配布状態では内部点の未実装エラーで停止する。
+共通パッケージに処理を委譲する。
 """
 function centered_step!(u_new, u_old, c::Real, dt::Real, dx::Real)
-    # 計算や書込みの前に、入力条件をまとめて確認する。
-    validate_step_inputs(u_new, u_old, c, dt, dx)
-    # courantは1ステップで進む格子幅の割合を表すCFL数です。
-    courant = c * dt / dx
-    # copyto!で古い値を複製し、内部を更新する間も両端点の値を保ちます。
-    copyto!(u_new, u_old)
-    for i in 2:(length(u_old) - 1)
-        #=
-        TODO(N01):
-        中心差分と陽Euler法による1ステップの更新を実装する。
-        授業ページの式を、i - 1とi + 1の添字を使ってコードへ写す。
-        =#
-        u_new[i] = u_old[i] - (courant / 2) * (u_old[i + 1] - u_old[i - 1])
-    end
-    return u_new
+    return ThermofluidExercise.N01.centered_step!(u_new, u_old, c, dt, dx)
 end
 
 # === 境界条件と時間発展の流れ ===
@@ -160,13 +125,11 @@ end
 # 返り値
 
 境界を書き換えた入力 `u`。
+
+共通パッケージに処理を委譲する。
 """
 function apply_boundary!(u::AbstractVector{<:Real}; left_value::Real = 1.0)
-    # 計算や書込みの前に、入力条件をまとめて確認する。
-    validate_boundary_inputs(u, left_value)
-    u[1] = left_value
-    u[end] = u[end - 1]
-    return u
+    return ThermofluidExercise.N01.apply_boundary!(u; left_value)
 end
 
 """

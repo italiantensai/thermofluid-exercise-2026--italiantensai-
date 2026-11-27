@@ -1,7 +1,24 @@
 # N05の共通API。周期添字 → 流束 → バッファ検証 → 刻み調整 → 既習課題の入口の順に読みます。
-# TODOを実装して既存の入力・返り値の契約を保ち、N06以降でも再利用します。
+# N01〜N04の更新と境界処理は課題別のサブモジュールに置きます。
 
 module ThermofluidExercise
+
+function validate_periodic_index(i, n)
+    i isa Integer && n isa Integer && !(i isa Bool || n isa Bool) &&
+        n >= 1 && 1 <= i <= n ||
+        throw(ArgumentError("添字は1 <= i <= n、点数はn >= 1の整数です（Bool不可）"))
+    return nothing
+end
+
+finite_real(value, name) =
+    value isa Real && isfinite(value) ? nothing :
+    throw(ArgumentError("$name は有限な実数です"))
+
+function timestep_count(count)
+    isfinite(count) && count <= typemax(Int) ||
+        throw(ArgumentError("ステップ数が表現範囲を超えています"))
+    return max(1, ceil(Int, count))
+end
 
 """
     periodic_left_index(i, n)
@@ -17,16 +34,11 @@ i,nはBoolを除く整数、n>=1、1<=i<=n。
 
 # 返り値
 
-実装後は 1からnまでの整数。
-
-# 受講生のToDo
-
-N02の周期左隣を共通化し、先頭から左へ越えたときは末尾の添字を返す。1点の場合も扱う。
-この関数では引数条件の検証も学生が実装する。N05の共通APIと既習N02を参照する。配布状態では未実装エラーで停止する。
+1からnまでの整数。
 """
 function periodic_left_index(i, n)
-    # TODO(N05): 周期配列の左隣添字を返す。
-    error("未実装 N05: periodic_left_index")
+    validate_periodic_index(i, n)
+    return i == 1 ? n : i - 1
 end
 
 """
@@ -43,16 +55,11 @@ i,nはBoolを除く整数、n>=1、1<=i<=n。
 
 # 返り値
 
-実装後は 1からnまでの整数。
-
-# 受講生のToDo
-
-周期右隣の添字を求め、末尾から右へ越えたときは先頭へ戻す。1点の場合も扱う。
-左隣APIと同じ引数条件の検証も学生が実装する。N04の周期左右隣接とN05の共通APIを参照する。配布状態では未実装エラーで停止する。
+1からnまでの整数。
 """
 function periodic_right_index(i, n)
-    # TODO(N05): 周期配列の右隣添字を返す。
-    error("未実装 N05: periodic_right_index")
+    validate_periodic_index(i, n)
+    return i == n ? 1 : i + 1
 end
 
 """
@@ -69,16 +76,12 @@ u,speedの有限実数を検証する。
 
 # 返り値
 
-実装後は スカラーの線形流束。
-
-# 受講生のToDo
-
-1点の場と速度を有限実数として検証し、N01で使った線形流束をスカラーで返す。配列の更新は呼出し側の責務である。
-入力検証も学生の実装範囲。N05の共通APIを参照する。配布状態では未実装エラーで停止する。
+スカラーの線形流束。
 """
 function linear_flux(u, speed)
-    # TODO(N05): 有限実数の入力を検証し、線形流束を返す。
-    error("未実装 N05: linear_flux")
+    finite_real(u, "u")
+    finite_real(speed, "speed")
+    return speed * u
 end
 
 """
@@ -94,16 +97,11 @@ end
 
 # 返り値
 
-実装後は スカラーのBurgers流束。
-
-# 受講生のToDo
-
-1点の場を有限実数として検証し、既習N02のBurgers流束をスカラーで返す。負値も流束の入力として扱う。
-入力検証も学生の実装範囲。配布状態では未実装エラーで停止する。
+スカラーのBurgers流束。
 """
 function burgers_flux(u)
-    # TODO(N05): 有限実数の入力を検証し、Burgers流束を返す。
-    error("未実装 N05: burgers_flux")
+    finite_real(u, "u")
+    return u^2 / 2
 end
 
 """
@@ -121,17 +119,18 @@ end
 
 # 返り値
 
-実装後は 成功時はnothing。
-
-# 受講生のToDo
-
-新旧配列の型・形状・軸・点数・有限旧値と、同じ記憶領域を共有しないことを検査する。出力の初期値の有限性は要求しない。
-全点で同じ旧場を読むため、入力を書き換えず、不正なら更新前にArgumentErrorを投げる検証APIを実装する。
-N01〜N04のバッファ検証とN05の共通APIを参照する。配布状態では未実装エラーで停止する。
+成功時はnothing。
 """
 function validate_buffers(u_new, u_old)
-    # TODO(N05): 新旧配列の形状・型・非alias・旧値の有限性を検証する。
-    error("未実装 N05: validate_buffers")
+    all(u -> u isa AbstractArray{<:AbstractFloat}, (u_new, u_old)) ||
+        throw(ArgumentError("新旧バッファは浮動小数の配列です"))
+    Base.require_one_based_indexing(u_new, u_old)
+    axes(u_new) == axes(u_old) && ndims(u_old) > 0 && all(n -> n >= 3, size(u_old)) ||
+        throw(ArgumentError("新旧バッファは同形状で各軸3点以上です"))
+    (u_new === u_old || Base.mightalias(u_new, u_old)) &&
+        throw(ArgumentError("新旧バッファが重なっています"))
+    all(isfinite, u_old) || throw(ArgumentError("旧配列は有限値にしてください"))
+    return nothing
 end
 
 """
@@ -148,251 +147,33 @@ dt_max,t_finalは有限な正値。表現不能な刻みやステップ数も拒
 
 # 返り値
 
-実装後は `(;steps, dt)` のNamedTuple。stepsは正整数、dtは有限正値でdt_max以下、steps回でt_finalへ到達する。
-
-# 受講生のToDo
-
-最終時刻へ等間隔で到達し、刻みがdt_max以下になる正整数stepsと正のdtを返す。
-有限正の入力と、ステップ数・刻みの表現可能性の検証も実装する。N01〜N04の時間刻み調整とN05の共通APIを参照する。配布状態では未実装エラーで停止する。
+`(;steps, dt)` のNamedTuple。stepsは正整数、dtは有限正値でdt_max以下、steps回でt_finalへ到達する。
 """
 function fit_timestep(dt_max, t_final)
-    # TODO(N05): 安定上限を超えない刻みとステップ数を最終時刻から返す。
-    error("未実装 N05: fit_timestep")
+    finite_real(dt_max, "dt_max")
+    finite_real(t_final, "t_final")
+    dt_max > 0 && t_final > 0 || throw(ArgumentError("dt_maxとt_finalは正です"))
+
+    t, upper, _ = promote(t_final, dt_max, 1.0)
+    steps = timestep_count(t / upper)
+    dt = Float64(t / steps)
+    if dt > dt_max
+        # 切り上げやFloat64への丸めで上限を超えた場合は、上限側へ丸め直す。
+        limit = Float64(dt_max)
+        limit > dt_max && (limit = prevfloat(limit))
+        limit > 0 || throw(ArgumentError("刻みがFloat64の表現範囲を外れています"))
+        steps = timestep_count(BigFloat(t_final) / BigFloat(limit))
+        dt = Float64(BigFloat(t_final) / steps)
+    end
+    isfinite(dt) && 0 < dt <= dt_max ||
+        throw(ArgumentError("刻みがFloat64の表現範囲を外れています"))
+    return (; steps, dt)
 end
 
-module N01
-
-"""
-    upwind_step!(args...; kwargs...)
-
-N01の風上更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、有限正の移流速度、時間刻み、格子幅の順。新配列に書込み、旧配列を保持する。
-- `kwargs`: キーワード引数はない。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は更新した新配列。内部点を更新し、境界値は呼出し側で適用する。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function upwind_step!(args...; kwargs...)
-    # TODO(N05): 既習のN01.upwind_step!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N01.upwind_step!")
-end
-
-"""
-    centered_step!(args...; kwargs...)
-
-N01の中心差分更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、有限正の移流速度、時間刻み、格子幅の順。新配列に書込み、旧配列を保持する。
-- `kwargs`: キーワード引数はない。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は更新した新配列。内部点を更新し、境界値は呼出し側で適用する。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function centered_step!(args...; kwargs...)
-    # TODO(N05): 既習のN01.centered_step!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N01.centered_step!")
-end
-
-"""
-    apply_boundary!(args...; kwargs...)
-
-N01の左流入・右流出境界を共通APIへ移す。
-
-# 引数
-
-- `args`: 端点を書き換えるベクトル。
-- `kwargs`: `left_value` は有限な左境界値（既定1.0）。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は境界を適用した入力ベクトル。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function apply_boundary!(args...; kwargs...)
-    # TODO(N05): 既習のN01.apply_boundary!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N01.apply_boundary!")
-end
-end
-module N02
-
-"""
-    nonlinear_upwind_step!(args...; kwargs...)
-
-N02の非線形風上更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、時間刻み、格子幅の順。新旧は独立し、旧場を保持する。
-- `kwargs`: `boundary` は `:fixed` または `:periodic`（既定 `:fixed`）。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は境界も適用した新配列。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function nonlinear_upwind_step!(args...; kwargs...)
-    # TODO(N05): 既習のN02.nonlinear_upwind_step!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N02.nonlinear_upwind_step!")
-end
-
-"""
-    apply_boundary!(args...; kwargs...)
-
-N02の固定または周期境界を共通APIへ移す。
-
-# 引数
-
-- `args`: 境界を適用するベクトル。周期境界では格子の全点を使う。
-- `kwargs`: `boundary` は `:fixed` または `:periodic`（既定 `:fixed`）。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は境界を適用した入力ベクトル。周期境界では値を変更しない。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function apply_boundary!(args...; kwargs...)
-    # TODO(N05): 既習のN02.apply_boundary!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N02.apply_boundary!")
-end
-end
-module N03
-
-"""
-    diffusion_step!(args...; kwargs...)
-
-N03の熱拡散更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、時間刻み、格子幅、有限正の拡散係数の順。新旧は独立し、旧場を保持する。
-- `kwargs`: `boundary` は固定温度の `:fixed`（既定）または断熱の `:insulated`。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は選択した境界も適用した新配列。安定上限を超える刻みも実験用に受け付ける。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function diffusion_step!(args...; kwargs...)
-    # TODO(N05): 既習のN03.diffusion_step!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N03.diffusion_step!")
-end
-
-"""
-    apply_boundary!(args...; kwargs...)
-
-N03の固定温度または断熱端点の更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、有限正の実効Fourier数の順。新旧は独立し、旧場を保持する。
-- `kwargs`: `boundary` は固定温度の `:fixed`（既定）または断熱の `:insulated`。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は両端を更新した新ベクトル。内部点は変更しない。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function apply_boundary!(args...; kwargs...)
-    # TODO(N05): 既習のN03.apply_boundary!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N03.apply_boundary!")
-end
-end
-module N04
-
-"""
-    stable_timestep(args...; kwargs...)
-
-N04の合成安定条件による刻み選択を共通APIへ移す。
-
-# 引数
-
-- `args`: 有限非負の最大速度、有限正の格子幅、有限非負の拡散係数の順。速度と拡散係数を同時に0にしない。
-- `kwargs`: `safety` は0より大きく1以下（既定0.8）。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は有限正の時間刻み。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function stable_timestep(args...; kwargs...)
-    # TODO(N05): 既習のN04.stable_timestepを共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N04.stable_timestep")
-end
-
-"""
-    advection_diffusion_step!(args...; kwargs...)
-
-N04の移流拡散更新を共通APIへ移す。
-
-# 引数
-
-- `args`: 新旧ベクトル、時間刻み、格子幅、有限非負の拡散係数の順。新旧は独立し、旧場を保持する。
-- `kwargs`: `model` を明示する。`advection=true`、`speed=1.0` は既習入口と同じ。
-
-対応する既習関数と同じ入力検証を保つ。未実装時は未実装エラーで停止する。
-
-# 返り値
-
-実装後は全周期格子点を更新した新配列。
-
-# 受講生のToDo
-
-既習の同名関数を共通APIを使う処理へ移す。入力検証・更新範囲・入力保持を保つ。
-"""
-function advection_diffusion_step!(args...; kwargs...)
-    # TODO(N05): 既習のN04.advection_diffusion_step!を共通APIを使う処理へ移し、既存の契約を保つ。
-    error("未実装 N05: N04.advection_diffusion_step!")
-end
-end
+include("N01LinearAdvection.jl")
+include("N02NonlinearAdvection.jl")
+include("N03Diffusion.jl")
+include("N04AdvectionDiffusion.jl")
 include("N06Advection.jl")
 include("N07Transport.jl")
 include("N08N09Elliptic.jl")
